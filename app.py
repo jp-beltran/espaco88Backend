@@ -131,8 +131,8 @@ def validate_registration(data):
 @app.route('/health')
 def health_check():
     try:
-        # Teste simples de conexão com o banco
-        db.session.execute('SELECT 1')
+        # Teste simples criando as tabelas (se já existem, não faz nada)
+        db.create_all()
         return jsonify({
             "status": "healthy", 
             "timestamp": datetime.utcnow().isoformat(),
@@ -144,7 +144,6 @@ def health_check():
             "timestamp": datetime.utcnow().isoformat(),
             "error": str(e)
         }), 500
-
 # ===================== ENDPOINTS DE USUÁRIO =====================
 
 @app.route('/users', methods=['POST'])
