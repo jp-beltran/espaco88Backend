@@ -1,0 +1,30 @@
+version: "3.8"
+
+services:
+  db:
+    image: postgres:15
+    container_name: pgdb
+    environment:
+      POSTGRES_USER: USER
+      POSTGRES_PASSWORD: MONELFALMA
+      POSTGRES_DB: espaco88data
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  api:
+    build: .
+    container_name: flask-api
+    ports:
+      - "5000:5000"
+    environment:
+      DATABASE_URL: postgresql://USER:MONELFALMA@pgdb:5432/espaco88data
+    depends_on:
+      - db
+    command: ["./wait-for-it.sh", "db:5432", "--", "python", "app.py"]
+    volumes:
+      - .:/app
+
+volumes:
+  pgdata:
