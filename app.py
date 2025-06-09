@@ -3,7 +3,7 @@ from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 import re
 
 app = Flask(__name__)
@@ -91,6 +91,7 @@ def validate_registration(data):
             errors.append("O nome deve ter no máximo 50 caracteres.")
         if not re.match(r'^[A-Za-zÀ-ÿ\s]+$', name):
             errors.append("O nome deve conter apenas letras e espaços.")
+    
     email = data.get('email', '').strip()
     if not email:
         errors.append("Email é obrigatório.")
@@ -99,6 +100,7 @@ def validate_registration(data):
             errors.append("O email deve ter no máximo 100 caracteres.")
         if not re.match(r"[^@]+@[^@]+\.[^@]+", email):
             errors.append("Email inválido.")
+    
     password = data.get('password', '')
     if not password:
         errors.append("Senha é obrigatória.")
@@ -111,22 +113,26 @@ def validate_registration(data):
             errors.append("A senha deve conter pelo menos uma letra maiúscula.")
         if not re.search(r'\d', password):
             errors.append("A senha deve conter pelo menos um número.")
+    
     confirm_password = data.get('confirmPassword', '')
     if not confirm_password:
         errors.append("Confirmação da senha é obrigatória.")
     elif password != confirm_password:
         errors.append("As senhas não coincidem.")
+    
     phone = data.get('phone', '').strip()
     if not phone:
         errors.append("Telefone é obrigatório.")
     elif len(phone) > 15:
         errors.append("O telefone deve ter no máximo 15 caracteres.")
+    
     user_type = data.get('type', '')
     if user_type not in ['barber', 'client']:
         errors.append("Tipo de usuário inválido.")
+    
     return errors
 
-# ===================== HEALTH CHECK (ADICIONADO) =====================
+# ===================== HEALTH CHECK =====================
 
 @app.route('/health')
 def health_check():
@@ -144,6 +150,7 @@ def health_check():
             "timestamp": datetime.utcnow().isoformat(),
             "error": str(e)
         }), 500
+
 # ===================== ENDPOINTS DE USUÁRIO =====================
 
 @app.route('/users', methods=['POST'])
