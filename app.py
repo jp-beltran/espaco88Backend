@@ -211,6 +211,32 @@ def get_user(user_id):
     except Exception as e:
         return jsonify({'error': f'Erro interno: {str(e)}'}), 500
 
+@app.route('/users/me', methods=['GET'])
+def get_current_user():
+    try:
+        # Por enquanto, vamos pegar o user_id do header Authorization
+        # Em produção, isso viria do JWT decodificado
+        auth_header = request.headers.get('Authorization', '')
+        if not auth_header:
+            return jsonify({'error': 'Token não fornecido'}), 401
+        
+        # Simulando extração do user_id do token
+        # Em produção, decodificar o JWT aqui
+        user_id = request.headers.get('X-User-Id')
+        if not user_id:
+            return jsonify({'error': 'User ID não fornecido'}), 401
+        
+        user = User.query.get_or_404(int(user_id))
+        return jsonify({
+            'id': user.id,
+            'name': user.name,
+            'email': user.email,
+            'phone': user.phone,
+            'type': user.type
+        })
+    except Exception as e:
+        return jsonify({'error': f'Erro interno: {str(e)}'}), 500
+
 @app.route('/users/<int:user_id>', methods=['PUT'])
 def update_user(user_id):
     try:
