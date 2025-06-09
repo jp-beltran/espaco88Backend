@@ -407,6 +407,60 @@ def get_barber_schedule(barber_id):
     except Exception as e:
         return jsonify({'error': f'Erro interno: {str(e)}'}), 500
 
+# Endpoint para criar horários padrão para um barbeiro
+@app.route('/schedules/<int:barber_id>/default', methods=['POST'])
+def create_default_schedule(barber_id):
+    try:
+        # Verificar se o barbeiro existe
+        barber = User.query.get(barber_id)
+        if not barber or barber.type != 'barber':
+            return jsonify({'error': 'Barbeiro não encontrado'}), 404
+        
+        # Verificar se já tem horários cadastrados
+        existing = BarberSchedule.query.filter_by(barber_id=barber_id).first()
+        if existing:
+            return jsonify({'error': 'Barbeiro já possui horários cadastrados'}), 400
+        
+        # Criar horários padrão (Segunda a Sábado, 9h às 19h)
+        for day in range(6):  # 0=Segunda a 5=Sábado
+            schedule = BarberSchedule(
+                barber_id=barber_id,
+                day_of_week=day,
+                start_time=time(9, 0),  # 9:00
+                end_time=time(19, 0),   # 19:00
+                active=True
+            )
+            db.session.add(schedule)
+        
+        db.session.commit()
+        return jsonify({'message': 'Horários padrão criados com sucesso'}), 201
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': f'Erro interno: {str(e)}'}), 500
+
+# Atualizar horário existente
+@app.route('/schedules/<int:schedule_id>', methods=['PUT'])
+def update_schedule(schedule_id):
+    try:
+        schedule = BarberSchedule.query.get_or_404(schedule_id)
+        data = request.get_json()
+        
+        if 'day_of_week' in data:
+            schedule.day_of_week = data['day_of_week']
+        if 'start_time' in data:
+            schedule.start_time = datetime.strptime(data['start_time'], '%H:%M').time()
+        if 'end_time' in data:
+            schedule.end_time = datetime.strptime(data['end_time'], '%H:%M').time()
+        if 'active' in data:
+            schedule.active = data['active']
+        
+        db.session.commit()
+        return jsonify({'message': 'Horário atualizado com sucesso'})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': f'Erro interno: {str(e)}'}), 500
+
 # ===================== ENDPOINTS DE AGENDAMENTOS =====================
 
 @app.route('/appointments', methods=['POST'])
