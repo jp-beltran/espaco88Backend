@@ -324,7 +324,6 @@ def login():
         print(f"❌ Erro no login: {str(e)}")
         return jsonify({'error': f'Erro interno: {str(e)}'}), 500
 
-# CORREÇÃO: Remover função duplicada update_user
 @app.route('/users/<int:user_id>', methods=['PUT', 'OPTIONS'])
 def update_user(user_id):
     try:
@@ -397,8 +396,26 @@ def update_user(user_id):
             updated_fields.append('senha')
             print(f"✅ Senha atualizada")
         
+        # ⭐ NOVA PARTE: Atualizar avatar_url
+        if 'avatar_url' in data:
+            new_avatar_url = data['avatar_url']
+            print(f"🖼️ Processando avatar_url: {new_avatar_url}")
+            
+            # Permitir None, string vazia ou URL válida
+            if new_avatar_url is None or new_avatar_url == '':
+                user.avatar_url = None
+                updated_fields.append('avatar')
+                print(f"✅ Avatar removido")
+            elif isinstance(new_avatar_url, str):
+                user.avatar_url = new_avatar_url.strip()
+                updated_fields.append('avatar')
+                print(f"✅ Avatar atualizado para: {new_avatar_url.strip()}")
+            else:
+                return jsonify({'error': 'URL do avatar deve ser uma string válida ou nula'}), 400
+        
         # Verificar se algo foi atualizado
         if not updated_fields:
+            print("❌ Nenhum campo foi alterado")
             return jsonify({'error': 'Nenhum campo válido foi fornecido para atualização'}), 400
         
         # Salvar no banco de dados
@@ -408,7 +425,7 @@ def update_user(user_id):
         fields_str = ', '.join(updated_fields)
         print(f"✅ Usuário {user_id} atualizado com sucesso. Campos: {fields_str}")
         
-        # Retornar dados atualizados (sem senha)
+        # Retornar dados atualizados
         return jsonify({
             'message': f'Perfil atualizado com sucesso! Campos alterados: {fields_str}',
             'user': {
@@ -417,7 +434,7 @@ def update_user(user_id):
                 'email': user.email,
                 'phone': user.phone,
                 'type': user.type,
-                'avatar_url': user.avatar_url
+                'avatar_url': user.avatar_url  # ⭐ INCLUIR AVATAR
             },
             'updated_fields': updated_fields
         }), 200
