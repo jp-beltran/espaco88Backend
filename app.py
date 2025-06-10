@@ -40,7 +40,8 @@ class User(db.Model):
     email = db.Column(db.String(100), unique=True, nullable=False)
     password = db.Column(db.String(200), nullable=False)
     phone = db.Column(db.String(15), nullable=False)
-    type = db.Column(db.String(10), nullable=False)  # "barber" ou "client"
+    type = db.Column(db.String(10), nullable=False)  
+    avatar_url = db.Column(db.Text, nullable=True)  
     
     # Relacionamentos
     barber_appointments = db.relationship('Appointment', foreign_keys='Appointment.barber_id', backref='barber', lazy='dynamic')
@@ -210,45 +211,69 @@ def login():
     except Exception as e:
         return jsonify({'error': f'Erro interno: {str(e)}'}), 500
 
-@app.route('/users/<int:user_id>', methods=['GET'])
-def get_user(user_id):
+@app.route('/users/<int:user_id>', methods=['PUT'])
+def update_user(user_id):
     try:
+        print(f"🔄 Atualizando usuário {user_id}")
         user = User.query.get_or_404(user_id)
-        return jsonify({
-            'id': user.id,
-            'name': user.name,
-            'email': user.email,
-            'phone': user.phone,
-            'type': user.type
-        })
-    except Exception as e:
-        return jsonify({'error': f'Erro interno: {str(e)}'}), 500
-
-@app.route('/users/me', methods=['GET'])
-def get_current_user():
-    try:
-        # Por enquanto, vamos pegar o user_id do header Authorization
-        # Em produção, isso viria do JWT decodificado
-        auth_header = request.headers.get('Authorization', '')
-        if not auth_header:
-            return jsonify({'error': 'Token não fornecido'}), 401
+        data = request.get_json()
         
-        # Simulando extração do user_id do token
-        # Em produção, decodificar o JWT aqui
-        user_id = request.headers.get('X-User-Id')
-        if not user_id:
-            return jsonify({'error': 'User ID não fornecido'}), 401
+        if not data:
+            return jsonify({'error': 'Nenhum dado fornecido'}), 400
         
-        user = User.query.get_or_404(int(user_id))
+        print(f"📝 Dados recebidos: {data}")
+        
+        # Validações de entrada
+        updated_fields = []
+        
+        # ... validações existentes para name, email, phone, password
+        
+        # ✅ ADICIONE ESTA VALIDAÇÃO PARA AVATAR:
+        if 'avatar_url' in data:
+            # Permitir null para remover avatar
+            if data['avatar_url'] is None:
+                user.avatar_url = None
+                updated_fields.append('avatar removido')
+                print(f"✅ Avatar removido")
+            else:
+                # Validar se é uma URL de imagem válida ou base64
+                avatar_url = data['avatar_url']
+                if len(avatar_url) > 10000:  # Limite para base64
+                    return jsonify({'error': 'Imagem muito grande'}), 400
+                
+                user.avatar_url = avatar_url
+                updated_fields.append('avatar')
+                print(f"✅ Avatar atualizado")
+        
+        # Verificar se algo foi atualizado
+        if not updated_fields:
+            return jsonify({'error': 'Nenhum campo válido foi fornecido para atualização'}), 400
+        
+        # Salvar no banco de dados
+        db.session.commit()
+        
+        # Log de sucesso
+        fields_str = ', '.join(updated_fields)
+        print(f"✅ Usuário {user_id} atualizado com sucesso. Campos: {fields_str}")
+        
+        # Retornar dados atualizados (sem senha)
         return jsonify({
-            'id': user.id,
-            'name': user.name,
-            'email': user.email,
-            'phone': user.phone,
-            'type': user.type
-        })
+            'message': f'Perfil atualizado com sucesso! Campos alterados: {fields_str}',
+            'user': {
+                'id': user.id,
+                'name': user.name,
+                'email': user.email,
+                'phone': user.phone,
+                'type': user.type,
+                'avatar_url': user.avatar_url  
+            },
+            'updated_fields': updated_fields
+        }), 200
+        
     except Exception as e:
-        return jsonify({'error': f'Erro interno: {str(e)}'}), 500
+        print(f"❌ Erro ao atualizar usuário {user_id}: {str(e)}")
+        db.session.rollback()
+        return jsonify({'error': f'Erro interno do servidor: {str(e)}'}), 500
 
 @app.route('/users/<int:user_id>', methods=['PUT'])
 def update_user(user_id):
@@ -426,7 +451,8 @@ def get_current_user():
             'name': user.name,
             'email': user.email,
             'phone': user.phone,
-            'type': user.type
+            'type': user.type,
+            'avatar_url': user.avatar_url
         }), 200
         
     except Exception as e:
