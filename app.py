@@ -1,5 +1,5 @@
 import os
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, make_response
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -7,7 +7,35 @@ from datetime import datetime, timedelta, time
 import re
 
 app = Flask(__name__)
-CORS(app)
+
+# ✅ CORS CONFIGURADO CORRETAMENTE - PERMITE TUDO TEMPORARIAMENTE
+CORS(app, 
+     origins="*",  # Permite qualquer origem
+     methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+     allow_headers=['Content-Type', 'Authorization', 'X-User-Id', 'Origin', 'Accept'],
+     supports_credentials=False,
+     max_age=3600
+)
+
+# ✅ Handler manual para OPTIONS (preflight)
+@app.before_request
+def handle_preflight():
+    if request.method == "OPTIONS":
+        response = make_response()
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add('Access-Control-Allow-Headers', "*")
+        response.headers.add('Access-Control-Allow-Methods', "*")
+        response.headers.add('Access-Control-Max-Age', "3600")
+        return response
+
+# ✅ Headers de resposta global
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-User-Id')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    response.headers.add('Access-Control-Max-Age', '3600')
+    return response
 
 # Configuração do banco de dados MELHORADA
 if os.getenv('RAILWAY_ENVIRONMENT') or os.getenv('DATABASE_URL'):
@@ -17,9 +45,11 @@ if os.getenv('RAILWAY_ENVIRONMENT') or os.getenv('DATABASE_URL'):
     if database_url and database_url.startswith('postgres://'):
         database_url = database_url.replace('postgres://', 'postgresql://', 1)
     app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+    print(f"🐘 Usando PostgreSQL: {database_url[:50]}...")
 else:
     # Configuração local
     app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///local.db'
+    print("📁 Usando SQLite local")
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
@@ -132,38 +162,111 @@ def validate_registration(data):
     
     return errors
 
-# ===================== HEALTH CHECK =====================
+# ===================== HEALTH CHECK MELHORADO =====================
 
-@app.route('/health')
+@app.route('/health', methods=['GET', 'OPTIONS'])
 def health_check():
     try:
-        # Teste simples criando as tabelas (se já existem, não faz nada)
+        print("🏥 Health check solicitado")
+        
+        # Teste de conexão com banco
         db.create_all()
-        return jsonify({
+        
+        # Teste básico de query
+        users_count = User.query.count()
+        
+        health_data = {
             "status": "healthy", 
             "timestamp": datetime.utcnow().isoformat(),
-            "database": "connected"
-        })
+            "database": "connected",
+            "users_count": users_count,
+            "version": "1.0.0",
+            "environment": os.getenv('RAILWAY_ENVIRONMENT', 'development')
+        }
+        
+        print(f"✅ Health check OK: {health_data}")
+        return jsonify(health_data), 200
+        
     except Exception as e:
-        return jsonify({
+        error_data = {
             "status": "unhealthy",
             "timestamp": datetime.utcnow().isoformat(),
             "error": str(e)
-        }), 500
+        }
+        print(f"❌ Health check failed: {error_data}")
+        return jsonify(error_data), 500
+
+# ===================== ENDPOINT HOME MELHORADO =====================
+
+@app.route('/', methods=['GET', 'OPTIONS'])
+def home():
+    home_data = {
+        "message": "🚀 API Espaço88 está funcionando!",
+        "version": "1.0.0",
+        "status": "online",
+        "timestamp": datetime.utcnow().isoformat(),
+        "endpoints": {
+            "health": "/health",
+            "users": "/users",
+            "login": "/auth/login",
+            "barbers": "/barbers",
+            "services": "/services",
+            "appointments": "/appointments",
+            "schedules": "/schedules"
+        }
+    }
+    print(f"🏠 Endpoint raiz acessado: {home_data}")
+    return jsonify(home_data)
+
+# ===================== TRATAMENTO DE ERROS GLOBAL =====================
+
+@app.errorhandler(500)
+def internal_error(error):
+    print(f"❌ Erro interno: {error}")
+    db.session.rollback()
+    return jsonify({
+        'error': 'Erro interno do servidor',
+        'timestamp': datetime.utcnow().isoformat()
+    }), 500
+
+@app.errorhandler(404)
+def not_found(error):
+    print(f"❌ Endpoint não encontrado: {request.url}")
+    return jsonify({
+        'error': 'Endpoint não encontrado',
+        'timestamp': datetime.utcnow().isoformat(),
+        'requested_url': request.url
+    }), 404
+
+@app.errorhandler(400)
+def bad_request(error):
+    print(f"❌ Requisição inválida: {error}")
+    return jsonify({
+        'error': 'Requisição inválida',
+        'timestamp': datetime.utcnow().isoformat()
+    }), 400
 
 # ===================== ENDPOINTS DE USUÁRIO =====================
 
-@app.route('/users', methods=['POST'])
+@app.route('/users', methods=['POST', 'OPTIONS'])
 def register_user():
     try:
+        print("📝 Tentativa de registro de usuário")
         data = request.get_json()
         if not data:
             return jsonify({"error": "Nenhum dado fornecido"}), 400
+        
+        print(f"📝 Dados recebidos: {data.get('email', 'N/A')}")
+        
         errors = validate_registration(data)
         if errors:
+            print(f"❌ Erros de validação: {errors}")
             return jsonify({"errors": errors}), 400
+        
         if User.query.filter_by(email=data['email'].strip()).first():
+            print(f"❌ Email já existe: {data['email']}")
             return jsonify({"error": "Email já cadastrado."}), 400
+        
         hashed_password = generate_password_hash(data['password'])
         new_user = User(
             name=data['name'].strip(),
@@ -172,24 +275,49 @@ def register_user():
             phone=data['phone'].strip(),
             type=data['type']
         )
+        
         db.session.add(new_user)
         db.session.commit()
+        
+        print(f"✅ Usuário criado: {new_user.email}")
         return jsonify({"message": "Usuário cadastrado com sucesso!"}), 201
+        
     except Exception as e:
+        print(f"❌ Erro no registro: {str(e)}")
         db.session.rollback()
         return jsonify({"error": f"Erro interno: {str(e)}"}), 500
 
-@app.route('/auth/login', methods=['POST'])
+@app.route('/auth/login', methods=['POST', 'OPTIONS'])
 def login():
     try:
+        print("🔐 Tentativa de login")
         data = request.get_json()
+        
+        if not data:
+            print("❌ Nenhum dado fornecido")
+            return jsonify({'error': 'Dados não fornecidos.'}), 400
+            
         email = data.get('email', '').strip()
         password = data.get('password', '')
+        
+        print(f"🔐 Login para: {email}")
+        
         if not email or not password:
+            print("❌ Email ou senha vazios")
             return jsonify({'error': 'Email e senha são obrigatórios.'}), 400
+        
         user = User.query.filter_by(email=email).first()
-        if not user or not check_password_hash(user.password, password):
+        
+        if not user:
+            print(f"❌ Usuário não encontrado: {email}")
             return jsonify({'error': 'Email ou senha inválidos.'}), 401
+            
+        if not check_password_hash(user.password, password):
+            print(f"❌ Senha incorreta para: {email}")
+            return jsonify({'error': 'Email ou senha inválidos.'}), 401
+        
+        print(f"✅ Login bem-sucedido: {email}")
+        
         return jsonify({
             'message': 'Login bem-sucedido',
             'user': {
@@ -201,12 +329,15 @@ def login():
             },
             'token': 'FAKE-JWT-TOKEN'
         }), 200
+        
     except Exception as e:
+        print(f"❌ Erro no login: {str(e)}")
         return jsonify({'error': f'Erro interno: {str(e)}'}), 500
 
-@app.route('/users/<int:user_id>', methods=['GET'])
+@app.route('/users/<int:user_id>', methods=['GET', 'OPTIONS'])
 def get_user(user_id):
     try:
+        print(f"👤 Buscando usuário: {user_id}")
         user = User.query.get_or_404(user_id)
         return jsonify({
             'id': user.id,
@@ -216,24 +347,28 @@ def get_user(user_id):
             'type': user.type
         })
     except Exception as e:
+        print(f"❌ Erro ao buscar usuário: {str(e)}")
         return jsonify({'error': f'Erro interno: {str(e)}'}), 500
 
-@app.route('/users/me', methods=['GET'])
+@app.route('/users/me', methods=['GET', 'OPTIONS'])
 def get_current_user():
     try:
+        print("👤 Buscando usuário atual")
+        
         # Por enquanto, vamos pegar o user_id do header Authorization
-        # Em produção, isso viria do JWT decodificado
         auth_header = request.headers.get('Authorization', '')
         if not auth_header:
+            print("❌ Token não fornecido")
             return jsonify({'error': 'Token não fornecido'}), 401
         
-        # Simulando extração do user_id do token
-        # Em produção, decodificar o JWT aqui
         user_id = request.headers.get('X-User-Id')
         if not user_id:
+            print("❌ User ID não fornecido")
             return jsonify({'error': 'User ID não fornecido'}), 401
         
         user = User.query.get_or_404(int(user_id))
+        print(f"✅ Usuário atual encontrado: {user.email}")
+        
         return jsonify({
             'id': user.id,
             'name': user.name,
@@ -242,11 +377,13 @@ def get_current_user():
             'type': user.type
         })
     except Exception as e:
+        print(f"❌ Erro ao buscar usuário atual: {str(e)}")
         return jsonify({'error': f'Erro interno: {str(e)}'}), 500
 
-@app.route('/users/<int:user_id>', methods=['PUT'])
+@app.route('/users/<int:user_id>', methods=['PUT', 'OPTIONS'])
 def update_user(user_id):
     try:
+        print(f"🔄 Atualizando usuário: {user_id}")
         user = User.query.get_or_404(user_id)
         data = request.get_json()
         
@@ -264,17 +401,21 @@ def update_user(user_id):
             user.password = generate_password_hash(data['password'])
         
         db.session.commit()
+        print(f"✅ Usuário atualizado: {user.email}")
         return jsonify({'message': 'Usuário atualizado com sucesso'})
     except Exception as e:
+        print(f"❌ Erro na atualização: {str(e)}")
         db.session.rollback()
         return jsonify({'error': f'Erro interno: {str(e)}'}), 500
 
 # ===================== ENDPOINTS DE BARBEIROS =====================
 
-@app.route('/barbers', methods=['GET'])
+@app.route('/barbers', methods=['GET', 'OPTIONS'])
 def get_barbers():
     try:
+        print("💇 Buscando barbeiros")
         barbers = User.query.filter_by(type='barber').all()
+        print(f"✅ Encontrados {len(barbers)} barbeiros")
         return jsonify([{
             'id': barber.id,
             'name': barber.name,
@@ -282,13 +423,15 @@ def get_barbers():
             'phone': barber.phone
         } for barber in barbers])
     except Exception as e:
+        print(f"❌ Erro ao buscar barbeiros: {str(e)}")
         return jsonify({'error': f'Erro interno: {str(e)}'}), 500
 
 # ===================== ENDPOINTS DE SERVIÇOS =====================
 
-@app.route('/services', methods=['POST'])
+@app.route('/services', methods=['POST', 'OPTIONS'])
 def create_service():
     try:
+        print("✂️ Criando serviço")
         data = request.get_json()
         
         # Verificar se o usuário é barbeiro
@@ -307,18 +450,22 @@ def create_service():
         db.session.add(service)
         db.session.commit()
         
+        print(f"✅ Serviço criado: {service.name}")
         return jsonify({
             'message': 'Serviço criado com sucesso',
             'service_id': service.id
         }), 201
     except Exception as e:
+        print(f"❌ Erro ao criar serviço: {str(e)}")
         db.session.rollback()
         return jsonify({'error': f'Erro interno: {str(e)}'}), 500
 
-@app.route('/services/<int:barber_id>', methods=['GET'])
+@app.route('/services/<int:barber_id>', methods=['GET', 'OPTIONS'])
 def get_services_by_barber(barber_id):
     try:
+        print(f"✂️ Buscando serviços do barbeiro: {barber_id}")
         services = Service.query.filter_by(barber_id=barber_id, active=True).all()
+        print(f"✅ Encontrados {len(services)} serviços")
         return jsonify([{
             'id': service.id,
             'name': service.name,
@@ -327,11 +474,13 @@ def get_services_by_barber(barber_id):
             'duration': service.duration
         } for service in services])
     except Exception as e:
+        print(f"❌ Erro ao buscar serviços: {str(e)}")
         return jsonify({'error': f'Erro interno: {str(e)}'}), 500
 
-@app.route('/services', methods=['GET'])
+@app.route('/services', methods=['GET', 'OPTIONS'])
 def get_all_services():
     try:
+        print("✂️ Buscando todos os serviços")
         services = Service.query.filter_by(active=True).all()
         return jsonify([{
             'id': service.id,
@@ -343,11 +492,13 @@ def get_all_services():
             'barber_id': service.barber_id
         } for service in services])
     except Exception as e:
+        print(f"❌ Erro ao buscar serviços: {str(e)}")
         return jsonify({'error': f'Erro interno: {str(e)}'}), 500
 
-@app.route('/services/<int:service_id>', methods=['PUT'])
+@app.route('/services/<int:service_id>', methods=['PUT', 'OPTIONS'])
 def update_service(service_id):
     try:
+        print(f"🔄 Atualizando serviço: {service_id}")
         service = Service.query.get_or_404(service_id)
         data = request.get_json()
         
@@ -363,27 +514,33 @@ def update_service(service_id):
             service.active = data['active']
         
         db.session.commit()
+        print(f"✅ Serviço atualizado: {service.name}")
         return jsonify({'message': 'Serviço atualizado com sucesso'})
     except Exception as e:
+        print(f"❌ Erro ao atualizar serviço: {str(e)}")
         db.session.rollback()
         return jsonify({'error': f'Erro interno: {str(e)}'}), 500
 
-@app.route('/services/<int:service_id>', methods=['DELETE'])
+@app.route('/services/<int:service_id>', methods=['DELETE', 'OPTIONS'])
 def delete_service(service_id):
     try:
+        print(f"🗑️ Deletando serviço: {service_id}")
         service = Service.query.get_or_404(service_id)
         service.active = False
         db.session.commit()
+        print(f"✅ Serviço removido: {service.name}")
         return jsonify({'message': 'Serviço removido com sucesso'})
     except Exception as e:
+        print(f"❌ Erro ao deletar serviço: {str(e)}")
         db.session.rollback()
         return jsonify({'error': f'Erro interno: {str(e)}'}), 500
 
 # ===================== ENDPOINTS DE HORÁRIOS =====================
 
-@app.route('/schedules', methods=['POST'])
+@app.route('/schedules', methods=['POST', 'OPTIONS'])
 def create_schedule():
     try:
+        print("⏰ Criando horário")
         data = request.get_json()
         
         schedule = BarberSchedule(
@@ -396,28 +553,38 @@ def create_schedule():
         db.session.add(schedule)
         db.session.commit()
         
+        print(f"✅ Horário criado para barbeiro: {data['barber_id']}")
         return jsonify({'message': 'Horário criado com sucesso'}), 201
     except Exception as e:
+        print(f"❌ Erro ao criar horário: {str(e)}")
         db.session.rollback()
         return jsonify({'error': f'Erro interno: {str(e)}'}), 500
 
-@app.route('/schedules/<int:barber_id>', methods=['GET'])
+@app.route('/schedules/<int:barber_id>', methods=['GET', 'OPTIONS'])
 def get_barber_schedule(barber_id):
     try:
-        schedules = BarberSchedule.query.filter_by(barber_id=barber_id, active=True).all()
-        return jsonify([{
+        print(f"⏰ Buscando horários do barbeiro: {barber_id}")
+        schedules = BarberSchedule.query.filter_by(barber_id=barber_id).order_by(BarberSchedule.day_of_week).all()
+        
+        result = [{
             'id': schedule.id,
             'day_of_week': schedule.day_of_week,
             'start_time': schedule.start_time.strftime('%H:%M'),
-            'end_time': schedule.end_time.strftime('%H:%M')
-        } for schedule in schedules])
+            'end_time': schedule.end_time.strftime('%H:%M'),
+            'active': schedule.active
+        } for schedule in schedules]
+        
+        print(f"✅ Encontrados {len(result)} horários")
+        return jsonify(result)
     except Exception as e:
+        print(f"❌ Erro ao buscar horários: {str(e)}")
         return jsonify({'error': f'Erro interno: {str(e)}'}), 500
 
-# Endpoint para criar horários padrão para um barbeiro
-@app.route('/schedules/<int:barber_id>/default', methods=['POST'])
+@app.route('/schedules/<int:barber_id>/default', methods=['POST', 'OPTIONS'])
 def create_default_schedule(barber_id):
     try:
+        print(f"⏰ Criando horários padrão para barbeiro: {barber_id}")
+        
         # Verificar se o barbeiro existe
         barber = User.query.get(barber_id)
         if not barber or barber.type != 'barber':
@@ -440,16 +607,18 @@ def create_default_schedule(barber_id):
             db.session.add(schedule)
         
         db.session.commit()
+        print(f"✅ Horários padrão criados para barbeiro: {barber_id}")
         return jsonify({'message': 'Horários padrão criados com sucesso'}), 201
         
     except Exception as e:
+        print(f"❌ Erro ao criar horários padrão: {str(e)}")
         db.session.rollback()
         return jsonify({'error': f'Erro interno: {str(e)}'}), 500
 
-# Atualizar horário existente
-@app.route('/schedules/<int:schedule_id>', methods=['PUT'])
+@app.route('/schedules/<int:schedule_id>', methods=['PUT', 'OPTIONS'])
 def update_schedule(schedule_id):
     try:
+        print(f"🔄 Atualizando horário: {schedule_id}")
         schedule = BarberSchedule.query.get_or_404(schedule_id)
         data = request.get_json()
         
@@ -460,19 +629,59 @@ def update_schedule(schedule_id):
         if 'end_time' in data:
             schedule.end_time = datetime.strptime(data['end_time'], '%H:%M').time()
         if 'active' in data:
-            schedule.active = data['active']
+            schedule.active = bool(data['active'])
         
         db.session.commit()
-        return jsonify({'message': 'Horário atualizado com sucesso'})
+        
+        print(f"✅ Horário atualizado: {schedule_id}")
+        return jsonify({
+            'message': 'Horário atualizado com sucesso',
+            'schedule': {
+                'id': schedule.id,
+                'active': schedule.active
+            }
+        })
     except Exception as e:
+        print(f"❌ Erro ao atualizar horário: {str(e)}")
+        db.session.rollback()
+        return jsonify({'error': f'Erro interno: {str(e)}'}), 500
+
+@app.route('/schedules/<int:schedule_id>', methods=['DELETE', 'OPTIONS'])
+def delete_schedule(schedule_id):
+    try:
+        print(f"🗑️ Excluindo horário: {schedule_id}")
+        schedule = BarberSchedule.query.get_or_404(schedule_id)
+        
+        # Verificar se há agendamentos futuros para este horário
+        future_appointments = Appointment.query.join(Service).filter(
+            Appointment.barber_id == schedule.barber_id,
+            Appointment.status == 'scheduled',
+            Appointment.appointment_date > datetime.now(),
+        ).first()
+        
+        if future_appointments:
+            return jsonify({
+                'error': 'Não é possível excluir este horário pois há agendamentos futuros. Desative temporariamente.'
+            }), 400
+        
+        # Exclusão definitiva
+        db.session.delete(schedule)
+        db.session.commit()
+        
+        print(f"✅ Horário excluído: {schedule_id}")
+        return jsonify({'message': 'Horário excluído permanentemente'})
+        
+    except Exception as e:
+        print(f"❌ Erro ao excluir horário: {str(e)}")
         db.session.rollback()
         return jsonify({'error': f'Erro interno: {str(e)}'}), 500
 
 # ===================== ENDPOINTS DE AGENDAMENTOS =====================
 
-@app.route('/appointments', methods=['POST'])
+@app.route('/appointments', methods=['POST', 'OPTIONS'])
 def create_appointment():
     try:
+        print("📅 Criando agendamento")
         data = request.get_json()
         
         appointment_date = datetime.fromisoformat(data['appointment_date'].replace('Z', '+00:00'))
@@ -506,18 +715,21 @@ def create_appointment():
         db.session.add(appointment)
         db.session.commit()
         
+        print(f"✅ Agendamento criado: {appointment.id}")
         return jsonify({
             'message': 'Agendamento criado com sucesso',
             'appointment_id': appointment.id
         }), 201
         
     except Exception as e:
+        print(f"❌ Erro ao criar agendamento: {str(e)}")
         db.session.rollback()
         return jsonify({'error': f'Erro interno: {str(e)}'}), 500
 
-@app.route('/appointments/<int:user_id>', methods=['GET'])
+@app.route('/appointments/<int:user_id>', methods=['GET', 'OPTIONS'])
 def get_user_appointments(user_id):
     try:
+        print(f"📅 Buscando agendamentos do usuário: {user_id}")
         user = User.query.get_or_404(user_id)
         
         if user.type == 'client':
@@ -525,6 +737,7 @@ def get_user_appointments(user_id):
         else:  # barber
             appointments = Appointment.query.filter_by(barber_id=user_id).all()
         
+        print(f"✅ Encontrados {len(appointments)} agendamentos")
         return jsonify([{
             'id': appointment.id,
             'client_name': appointment.client.name,
@@ -537,11 +750,13 @@ def get_user_appointments(user_id):
             'notes': appointment.notes
         } for appointment in appointments])
     except Exception as e:
+        print(f"❌ Erro ao buscar agendamentos: {str(e)}")
         return jsonify({'error': f'Erro interno: {str(e)}'}), 500
 
-@app.route('/appointments/<int:appointment_id>/status', methods=['PUT'])
+@app.route('/appointments/<int:appointment_id>/status', methods=['PUT', 'OPTIONS'])
 def update_appointment_status(appointment_id):
     try:
+        print(f"🔄 Atualizando status do agendamento: {appointment_id}")
         appointment = Appointment.query.get_or_404(appointment_id)
         data = request.get_json()
         
@@ -551,28 +766,34 @@ def update_appointment_status(appointment_id):
         appointment.status = data['status']
         db.session.commit()
         
+        print(f"✅ Status atualizado: {appointment.id} -> {data['status']}")
         return jsonify({'message': 'Status atualizado com sucesso'})
     except Exception as e:
+        print(f"❌ Erro ao atualizar status: {str(e)}")
         db.session.rollback()
         return jsonify({'error': f'Erro interno: {str(e)}'}), 500
 
-@app.route('/appointments/<int:appointment_id>', methods=['DELETE'])
+@app.route('/appointments/<int:appointment_id>', methods=['DELETE', 'OPTIONS'])
 def cancel_appointment(appointment_id):
     try:
+        print(f"❌ Cancelando agendamento: {appointment_id}")
         appointment = Appointment.query.get_or_404(appointment_id)
         appointment.status = 'cancelled'
         db.session.commit()
         
+        print(f"✅ Agendamento cancelado: {appointment.id}")
         return jsonify({'message': 'Agendamento cancelado com sucesso'})
     except Exception as e:
+        print(f"❌ Erro ao cancelar agendamento: {str(e)}")
         db.session.rollback()
         return jsonify({'error': f'Erro interno: {str(e)}'}), 500
 
 # ===================== ENDPOINTS DE HORÁRIOS DISPONÍVEIS =====================
 
-@app.route('/available-times/<int:barber_id>/<date>', methods=['GET'])
+@app.route('/available-times/<int:barber_id>/<date>', methods=['GET', 'OPTIONS'])
 def get_available_times(barber_id, date):
     try:
+        print(f"⏰ Buscando horários disponíveis: barbeiro {barber_id}, data {date}")
         target_date = datetime.strptime(date, '%Y-%m-%d').date()
         day_of_week = target_date.weekday()  # 0=Monday, 6=Sunday
         
@@ -584,6 +805,7 @@ def get_available_times(barber_id, date):
         ).first()
         
         if not schedule:
+            print(f"❌ Barbeiro não trabalha neste dia: {day_of_week}")
             return jsonify([])  # Barbeiro não trabalha neste dia
         
         # Buscar agendamentos existentes
@@ -612,35 +834,26 @@ def get_available_times(barber_id, date):
             
             current_time += timedelta(minutes=30)
         
+        print(f"✅ Encontrados {len(available_times)} horários disponíveis")
         return jsonify(available_times)
         
     except Exception as e:
+        print(f"❌ Erro ao buscar horários disponíveis: {str(e)}")
         return jsonify({'error': f'Erro interno: {str(e)}'}), 500
-
-# ===================== ENDPOINT HOME =====================
-
-@app.route('/')
-def home():
-    return jsonify({
-        "message": "API de Agendamento da Barbearia está no ar",
-        "version": "1.0.0",
-        "endpoints": {
-            "health": "/health",
-            "users": "/users",
-            "login": "/auth/login",
-            "barbers": "/barbers",
-            "services": "/services",
-            "appointments": "/appointments"
-        }
-    })
 
 # ===================== INICIALIZAÇÃO MELHORADA =====================
 
 if __name__ == '__main__':
     with app.app_context():
         try:
+            print("🚀 Iniciando aplicação...")
             db.create_all()
             print("✅ Tabelas do banco criadas com sucesso!")
+            
+            # Verificar se há usuários
+            users_count = User.query.count()
+            print(f"📊 Total de usuários no banco: {users_count}")
+            
         except Exception as e:
             print(f"❌ Erro ao criar tabelas: {e}")
     
@@ -650,5 +863,6 @@ if __name__ == '__main__':
     
     print(f"🚀 Iniciando servidor na porta {port}")
     print(f"🔧 Debug mode: {debug}")
+    print(f"🌍 Environment: {os.getenv('RAILWAY_ENVIRONMENT', 'development')}")
     
     app.run(host='0.0.0.0', port=port, debug=debug)
