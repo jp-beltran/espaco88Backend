@@ -8,9 +8,9 @@ import re
 
 app = Flask(__name__)
 
-# ✅ CONFIGURAÇÃO CORS SIMPLIFICADA - SEM DUPLICAÇÃO
+# ✅ CONFIGURAÇÃO CORS SIMPLIFICADA
 CORS(app, 
-     origins=["http://localhost:3000", "http://localhost:5173", "espaco88frontend-production.up.railway.app"],
+     origins=["http://localhost:3000", "http://localhost:5173", "https://espaco88frontend-production.up.railway.app"],
      methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
      allow_headers=['Content-Type', 'Authorization', 'X-User-Id', 'Origin', 'Accept', 'X-Requested-With'],
      supports_credentials=True,
@@ -324,108 +324,8 @@ def login():
         print(f"❌ Erro no login: {str(e)}")
         return jsonify({'error': f'Erro interno: {str(e)}'}), 500
 
+# CORREÇÃO: Remover função duplicada update_user
 @app.route('/users/<int:user_id>', methods=['PUT', 'OPTIONS'])
-def update_user(user_id):
-    try:
-        print(f"👤 Buscando usuário: {user_id}")
-        print(f"🔄 Atualizando usuário {user_id}")
-        user = User.query.get_or_404(user_id)
-        return jsonify({
-            'id': user.id,
-            'name': user.name,
-            'email': user.email,
-            'phone': user.phone,
-            'type': user.type
-        })
-    except Exception as e:
-        print(f"❌ Erro ao buscar usuário: {str(e)}")
-        return jsonify({'error': f'Erro interno: {str(e)}'}), 500
-
-@app.route('/users/me', methods=['GET', 'OPTIONS'])
-def get_current_user():
-    try:
-        print("👤 Buscando usuário atual")
-        
-        # Por enquanto, vamos pegar o user_id do header Authorization
-        auth_header = request.headers.get('Authorization', '')
-        if not auth_header:
-            print("❌ Token não fornecido")
-            return jsonify({'error': 'Token não fornecido'}), 401
-        
-        user_id = request.headers.get('X-User-Id')
-        if not user_id:
-            print("❌ User ID não fornecido")
-            return jsonify({'error': 'User ID não fornecido'}), 401
-        
-        user = User.query.get_or_404(int(user_id))
-        print(f"✅ Usuário atual encontrado: {user.email}")
-        
-        return jsonify({
-            'message': f'Perfil atualizado com sucesso! Campos alterados: {fields_str}',
-            'user': {
-                'id': user.id,
-                'name': user.name,
-                'email': user.email,
-                'phone': user.phone,
-                'type': user.type,
-                'avatar_url': user.avatar_url  
-            },
-            'updated_fields': updated_fields
-        }), 200
-        
-    except Exception as e:
-        print(f"❌ Erro ao buscar usuário atual: {str(e)}")
-        return jsonify({'error': f'Erro interno: {str(e)}'}), 500
-
-@app.route('/users/<int:user_id>', methods=['PUT', 'OPTIONS'])
-def update_user(user_id):
-    try:
-        print(f"🔄 Atualizando usuário: {user_id}")
-        user = User.query.get_or_404(user_id)
-        data = request.get_json()
-        
-        if 'name' in data:
-            user.name = data['name'].strip()
-        if 'email' in data:
-            # Verificar se email já existe para outro usuário
-            existing_user = User.query.filter_by(email=data['email'].strip()).first()
-            if existing_user and existing_user.id != user_id:
-                return jsonify({'error': 'Email já está em uso'}), 400
-            user.email = data['email'].strip()
-        if 'phone' in data:
-            user.phone = data['phone'].strip()
-        if 'password' in data and data['password']:
-            user.password = generate_password_hash(data['password'])
-        
-        db.session.commit()
-        print(f"✅ Usuário atualizado: {user.email}")
-        return jsonify({'message': 'Usuário atualizado com sucesso'})
-    except Exception as e:
-        print(f"❌ Erro na atualização: {str(e)}")
-        db.session.rollback()
-        return jsonify({'error': f'Erro interno: {str(e)}'}), 500
-
-# ===================== ENDPOINTS DE BARBEIROS =====================
-
-@app.route('/barbers', methods=['GET', 'OPTIONS'])
-def get_barbers():
-    try:
-        print("💇 Buscando barbeiros")
-        barbers = User.query.filter_by(type='barber').all()
-        print(f"✅ Encontrados {len(barbers)} barbeiros")
-        return jsonify([{
-            'id': barber.id,
-            'name': barber.name,
-            'email': barber.email,
-            'phone': barber.phone
-        } for barber in barbers])
-    except Exception as e:
-        print(f"❌ Erro ao buscar barbeiros: {str(e)}")
-        return jsonify({'error': f'Erro interno: {str(e)}'}), 500
-
-# ===================== ENDPOINT MELHORADO PARA ATUALIZAÇÃO DE PERFIL =====================
-
-@app.route('/users/<int:user_id>', methods=['PUT'])
 def update_user(user_id):
     try:
         print(f"🔄 Atualizando usuário {user_id}")
@@ -516,7 +416,8 @@ def update_user(user_id):
                 'name': user.name,
                 'email': user.email,
                 'phone': user.phone,
-                'type': user.type
+                'type': user.type,
+                'avatar_url': user.avatar_url
             },
             'updated_fields': updated_fields
         }), 200
@@ -526,9 +427,8 @@ def update_user(user_id):
         db.session.rollback()
         return jsonify({'error': f'Erro interno do servidor: {str(e)}'}), 500
 
-# ===================== ENDPOINT MELHORADO PARA BUSCAR PERFIL ATUAL =====================
-
-@app.route('/users/me', methods=['GET'])
+# CORREÇÃO: Função get_current_user corrigida
+@app.route('/users/me', methods=['GET', 'OPTIONS'])
 def get_current_user():
     try:
         # Obter user_id do header
@@ -569,7 +469,7 @@ def get_current_user():
 
 # ===================== ENDPOINT PARA VALIDAR EMAIL DISPONIBILIDADE =====================
 
-@app.route('/users/check-email', methods=['POST'])
+@app.route('/users/check-email', methods=['POST', 'OPTIONS'])
 def check_email_availability():
     try:
         data = request.get_json()
@@ -600,6 +500,23 @@ def check_email_availability():
         print(f"❌ Erro ao verificar email: {str(e)}")
         return jsonify({'error': f'Erro interno: {str(e)}'}), 500
 
+# ===================== ENDPOINTS DE BARBEIROS =====================
+
+@app.route('/barbers', methods=['GET', 'OPTIONS'])
+def get_barbers():
+    try:
+        print("💇 Buscando barbeiros")
+        barbers = User.query.filter_by(type='barber').all()
+        print(f"✅ Encontrados {len(barbers)} barbeiros")
+        return jsonify([{
+            'id': barber.id,
+            'name': barber.name,
+            'email': barber.email,
+            'phone': barber.phone
+        } for barber in barbers])
+    except Exception as e:
+        print(f"❌ Erro ao buscar barbeiros: {str(e)}")
+        return jsonify({'error': f'Erro interno: {str(e)}'}), 500
 
 # ===================== ENDPOINTS DE SERVIÇOS =====================
 
@@ -765,7 +682,7 @@ def create_default_schedule(barber_id):
         if not barber or barber.type != 'barber':
             return jsonify({'error': 'Barbeiro não encontrado'}), 404
         
-        # Verificar se já tem horários cadastrados
+         # Verificar se já tem horários cadastrados
         existing = BarberSchedule.query.filter_by(barber_id=barber_id).first()
         if existing:
             return jsonify({'error': 'Barbeiro já possui horários cadastrados'}), 400
@@ -1041,3 +958,4 @@ if __name__ == '__main__':
     print(f"🌍 Environment: {os.getenv('RAILWAY_ENVIRONMENT', 'development')}")
     
     app.run(host='0.0.0.0', port=port, debug=debug)
+        
