@@ -8,34 +8,16 @@ import re
 
 app = Flask(__name__)
 
-# ✅ CORS CONFIGURADO CORRETAMENTE - PERMITE TUDO TEMPORARIAMENTE
+# ✅ CONFIGURAÇÃO CORS SIMPLIFICADA - SEM DUPLICAÇÃO
 CORS(app, 
-     origins="*",  # Permite qualquer origem
+     origins="*",  
      methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
      allow_headers=['Content-Type', 'Authorization', 'X-User-Id', 'Origin', 'Accept'],
-     supports_credentials=False,
-     max_age=3600
+     supports_credentials=False
 )
 
-# ✅ Handler manual para OPTIONS (preflight)
-@app.before_request
-def handle_preflight():
-    if request.method == "OPTIONS":
-        response = make_response()
-        response.headers.add("Access-Control-Allow-Origin", "*")
-        response.headers.add('Access-Control-Allow-Headers', "*")
-        response.headers.add('Access-Control-Allow-Methods', "*")
-        response.headers.add('Access-Control-Max-Age', "3600")
-        return response
-
-# ✅ Headers de resposta global
-@app.after_request
-def after_request(response):
-    response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-User-Id')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
-    response.headers.add('Access-Control-Max-Age', '3600')
-    return response
+# ❌ REMOVIDO: Handler manual duplicado que estava causando o problema
+# @app.before_request e @app.after_request removidos para evitar duplicação
 
 # Configuração do banco de dados MELHORADA
 if os.getenv('RAILWAY_ENVIRONMENT') or os.getenv('DATABASE_URL'):
