@@ -401,17 +401,33 @@ def create_schedule():
         db.session.rollback()
         return jsonify({'error': f'Erro interno: {str(e)}'}), 500
 
-@app.route('/schedules/<int:barber_id>', methods=['GET'])
-def get_barber_schedule(barber_id):
+@app.route('/schedules/<int:schedule_id>', methods=['PUT'])
+def update_schedule(schedule_id):
     try:
-        schedules = BarberSchedule.query.filter_by(barber_id=barber_id, active=True).all()
-        return jsonify([{
-            'id': schedule.id,
-            'day_of_week': schedule.day_of_week,
-            'start_time': schedule.start_time.strftime('%H:%M'),
-            'end_time': schedule.end_time.strftime('%H:%M')
-        } for schedule in schedules])
+        schedule = BarberSchedule.query.get_or_404(schedule_id)
+        data = request.get_json()
+        
+        if 'day_of_week' in data:
+            schedule.day_of_week = data['day_of_week']
+        if 'start_time' in data:
+            schedule.start_time = datetime.strptime(data['start_time'], '%H:%M').time()
+        if 'end_time' in data:
+            schedule.end_time = datetime.strptime(data['end_time'], '%H:%M').time()
+        if 'active' in data:
+            schedule.active = bool(data['active'])  
+        
+        db.session.commit()
+        
+        # ✅ Retornar o objeto atualizado para confirmação
+        return jsonify({
+            'message': 'Horário atualizado com sucesso',
+            'schedule': {
+                'id': schedule.id,
+                'active': schedule.active
+            }
+        })
     except Exception as e:
+        db.session.rollback()
         return jsonify({'error': f'Erro interno: {str(e)}'}), 500
 
 # Endpoint para criar horários padrão para um barbeiro
