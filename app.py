@@ -10,14 +10,21 @@ app = Flask(__name__)
 
 # ✅ CONFIGURAÇÃO CORS SIMPLIFICADA - SEM DUPLICAÇÃO
 CORS(app, 
-     origins="*",  
+     origins=["http://localhost:3000", "http://localhost:5173", "espaco88frontend-production.up.railway.app"],
      methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-     allow_headers=['Content-Type', 'Authorization', 'X-User-Id', 'Origin', 'Accept'],
-     supports_credentials=False
+     allow_headers=['Content-Type', 'Authorization', 'X-User-Id', 'Origin', 'Accept', 'X-Requested-With'],
+     supports_credentials=True,
+     expose_headers=['Content-Type', 'Authorization']
 )
 
-# ❌ REMOVIDO: Handler manual duplicado que estava causando o problema
-# @app.before_request e @app.after_request removidos para evitar duplicação
+@app.before_request
+def handle_preflight():
+    if request.method == "OPTIONS":
+        response = make_response()
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add('Access-Control-Allow-Headers', "*")
+        response.headers.add('Access-Control-Allow-Methods', "*")
+        return response
 
 # Configuração do banco de dados MELHORADA
 if os.getenv('RAILWAY_ENVIRONMENT') or os.getenv('DATABASE_URL'):
