@@ -290,6 +290,183 @@ def get_barbers():
     except Exception as e:
         return jsonify({'error': f'Erro interno: {str(e)}'}), 500
 
+# ===================== ENDPOINT MELHORADO PARA ATUALIZAÇÃO DE PERFIL =====================
+
+@app.route('/users/<int:user_id>', methods=['PUT'])
+def update_user(user_id):
+    try:
+        print(f"🔄 Atualizando usuário {user_id}")
+        user = User.query.get_or_404(user_id)
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'error': 'Nenhum dado fornecido'}), 400
+        
+        print(f"📝 Dados recebidos: {data}")
+        
+        # Validações de entrada
+        updated_fields = []
+        
+        # Atualizar nome
+        if 'name' in data and data['name']:
+            new_name = data['name'].strip()
+            if len(new_name) < 3:
+                return jsonify({'error': 'O nome deve ter no mínimo 3 caracteres'}), 400
+            if len(new_name) > 50:
+                return jsonify({'error': 'O nome deve ter no máximo 50 caracteres'}), 400
+            if not re.match(r'^[A-Za-zÀ-ÿ\s]+$', new_name):
+                return jsonify({'error': 'O nome deve conter apenas letras e espaços'}), 400
+            
+            user.name = new_name
+            updated_fields.append('nome')
+            print(f"✅ Nome atualizado para: {new_name}")
+        
+        # Atualizar email
+        if 'email' in data and data['email']:
+            new_email = data['email'].strip().lower()
+            if len(new_email) > 100:
+                return jsonify({'error': 'O email deve ter no máximo 100 caracteres'}), 400
+            if not re.match(r"[^@]+@[^@]+\.[^@]+", new_email):
+                return jsonify({'error': 'Email inválido'}), 400
+            
+            # Verificar se email já existe para outro usuário
+            existing_user = User.query.filter_by(email=new_email).first()
+            if existing_user and existing_user.id != user_id:
+                return jsonify({'error': 'Este email já está sendo usado por outro usuário'}), 400
+            
+            user.email = new_email
+            updated_fields.append('email')
+            print(f"✅ Email atualizado para: {new_email}")
+        
+        # Atualizar telefone
+        if 'phone' in data and data['phone']:
+            new_phone = data['phone'].strip()
+            if len(new_phone) > 15:
+                return jsonify({'error': 'O telefone deve ter no máximo 15 caracteres'}), 400
+            
+            user.phone = new_phone
+            updated_fields.append('telefone')
+            print(f"✅ Telefone atualizado para: {new_phone}")
+        
+        # Atualizar senha
+        if 'password' in data and data['password']:
+            new_password = data['password']
+            if len(new_password) < 8:
+                return jsonify({'error': 'A senha deve ter no mínimo 8 caracteres'}), 400
+            if len(new_password) > 20:
+                return jsonify({'error': 'A senha deve ter no máximo 20 caracteres'}), 400
+            if not re.search(r'[A-Z]', new_password):
+                return jsonify({'error': 'A senha deve conter pelo menos uma letra maiúscula'}), 400
+            if not re.search(r'\d', new_password):
+                return jsonify({'error': 'A senha deve conter pelo menos um número'}), 400
+            
+            user.password = generate_password_hash(new_password)
+            updated_fields.append('senha')
+            print(f"✅ Senha atualizada")
+        
+        # Verificar se algo foi atualizado
+        if not updated_fields:
+            return jsonify({'error': 'Nenhum campo válido foi fornecido para atualização'}), 400
+        
+        # Salvar no banco de dados
+        db.session.commit()
+        
+        # Log de sucesso
+        fields_str = ', '.join(updated_fields)
+        print(f"✅ Usuário {user_id} atualizado com sucesso. Campos: {fields_str}")
+        
+        # Retornar dados atualizados (sem senha)
+        return jsonify({
+            'message': f'Perfil atualizado com sucesso! Campos alterados: {fields_str}',
+            'user': {
+                'id': user.id,
+                'name': user.name,
+                'email': user.email,
+                'phone': user.phone,
+                'type': user.type
+            },
+            'updated_fields': updated_fields
+        }), 200
+        
+    except Exception as e:
+        print(f"❌ Erro ao atualizar usuário {user_id}: {str(e)}")
+        db.session.rollback()
+        return jsonify({'error': f'Erro interno do servidor: {str(e)}'}), 500
+
+# ===================== ENDPOINT MELHORADO PARA BUSCAR PERFIL ATUAL =====================
+
+@app.route('/users/me', methods=['GET'])
+def get_current_user():
+    try:
+        # Obter user_id do header
+        auth_header = request.headers.get('Authorization', '')
+        user_id = request.headers.get('X-User-Id')
+        
+        print(f"🔍 Buscando perfil do usuário ID: {user_id}")
+        
+        if not auth_header:
+            return jsonify({'error': 'Token de autorização não fornecido'}), 401
+        
+        if not user_id:
+            return jsonify({'error': 'ID do usuário não fornecido no header'}), 401
+        
+        try:
+            user_id_int = int(user_id)
+        except ValueError:
+            return jsonify({'error': 'ID do usuário inválido'}), 400
+        
+        user = User.query.get(user_id_int)
+        if not user:
+            return jsonify({'error': 'Usuário não encontrado'}), 404
+        
+        print(f"✅ Perfil encontrado: {user.name} ({user.email})")
+        
+        return jsonify({
+            'id': user.id,
+            'name': user.name,
+            'email': user.email,
+            'phone': user.phone,
+            'type': user.type
+        }), 200
+        
+    except Exception as e:
+        print(f"❌ Erro ao buscar perfil: {str(e)}")
+        return jsonify({'error': f'Erro interno do servidor: {str(e)}'}), 500
+
+# ===================== ENDPOINT PARA VALIDAR EMAIL DISPONIBILIDADE =====================
+
+@app.route('/users/check-email', methods=['POST'])
+def check_email_availability():
+    try:
+        data = request.get_json()
+        email = data.get('email', '').strip().lower()
+        current_user_id = data.get('current_user_id')
+        
+        if not email:
+            return jsonify({'error': 'Email é obrigatório'}), 400
+        
+        if not re.match(r"[^@]+@[^@]+\.[^@]+", email):
+            return jsonify({'error': 'Email inválido'}), 400
+        
+        # Verificar se email já existe
+        existing_user = User.query.filter_by(email=email).first()
+        
+        if existing_user and existing_user.id != current_user_id:
+            return jsonify({
+                'available': False,
+                'message': 'Este email já está sendo usado por outro usuário'
+            }), 200
+        
+        return jsonify({
+            'available': True,
+            'message': 'Email disponível'
+        }), 200
+        
+    except Exception as e:
+        print(f"❌ Erro ao verificar email: {str(e)}")
+        return jsonify({'error': f'Erro interno: {str(e)}'}), 500
+
+
 # ===================== ENDPOINTS DE SERVIÇOS =====================
 
 @app.route('/services', methods=['POST'])
