@@ -5,10 +5,15 @@ from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, timedelta, time
 import re
-from datetime import datetime, timedelta, time
 
 app = Flask(__name__)
-CORS(app)
+
+# ✅ CORS configurado corretamente
+CORS(app, origins=[
+    "http://localhost:5173",  # Vite dev server
+    "http://localhost:3000",  # React dev server
+    "https://seudominio.com", # Seu domínio de produção
+], methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'])
 
 # Configuração do banco de dados MELHORADA
 if os.getenv('RAILWAY_ENVIRONMENT') or os.getenv('DATABASE_URL'):
@@ -402,9 +407,69 @@ def create_schedule():
         db.session.rollback()
         return jsonify({'error': f'Erro interno: {str(e)}'}), 500
 
+# ✅ ENDPOINT GET PARA BUSCAR HORÁRIOS DO BARBEIRO (estava faltando!)
+@app.route('/schedules/<int:barber_id>', methods=['GET'])
+def get_barber_schedule(barber_id):
+    try:
+        print(f"🔍 Buscando horários do barbeiro {barber_id}")
+        # Incluir TODOS os horários (ativos e inativos) para permitir gerenciamento completo
+        schedules = BarberSchedule.query.filter_by(barber_id=barber_id).order_by(BarberSchedule.day_of_week).all()
+        
+        result = [{
+            'id': schedule.id,
+            'day_of_week': schedule.day_of_week,
+            'start_time': schedule.start_time.strftime('%H:%M'),
+            'end_time': schedule.end_time.strftime('%H:%M'),
+            'active': schedule.active  # ✅ CAMPO ESSENCIAL
+        } for schedule in schedules]
+        
+        print(f"✅ Encontrados {len(result)} horários para barbeiro {barber_id}")
+        return jsonify(result)
+    except Exception as e:
+        print(f"❌ Erro ao buscar horários: {str(e)}")
+        return jsonify({'error': f'Erro interno: {str(e)}'}), 500
+
+# ✅ ENDPOINT PARA CRIAR HORÁRIOS PADRÃO (único, sem duplicação)
+@app.route('/schedules/<int:barber_id>/default', methods=['POST'])
+def create_default_schedule(barber_id):
+    try:
+        print(f"🔥 Criando horários padrão para barbeiro {barber_id}")
+        
+        # Verificar se o barbeiro existe
+        barber = User.query.get(barber_id)
+        if not barber or barber.type != 'barber':
+            return jsonify({'error': 'Barbeiro não encontrado'}), 404
+        
+        # Verificar se já tem horários cadastrados
+        existing = BarberSchedule.query.filter_by(barber_id=barber_id).first()
+        if existing:
+            return jsonify({'error': 'Barbeiro já possui horários cadastrados'}), 400
+        
+        # Criar horários padrão (Segunda a Sábado, 9h às 19h)
+        for day in range(6):  # 0=Segunda a 5=Sábado
+            schedule = BarberSchedule(
+                barber_id=barber_id,
+                day_of_week=day,
+                start_time=time(9, 0),  # 9:00
+                end_time=time(19, 0),   # 19:00
+                active=True
+            )
+            db.session.add(schedule)
+        
+        db.session.commit()
+        print(f"✅ Horários padrão criados com sucesso para barbeiro {barber_id}")
+        return jsonify({'message': 'Horários padrão criados com sucesso'}), 201
+        
+    except Exception as e:
+        print(f"❌ Erro ao criar horários padrão: {str(e)}")
+        db.session.rollback()
+        return jsonify({'error': f'Erro interno: {str(e)}'}), 500
+
+# ✅ ENDPOINT PARA ATUALIZAR HORÁRIO (único, sem duplicação)
 @app.route('/schedules/<int:schedule_id>', methods=['PUT'])
 def update_schedule(schedule_id):
     try:
+        print(f"🔄 Atualizando horário {schedule_id}")
         schedule = BarberSchedule.query.get_or_404(schedule_id)
         data = request.get_json()
         
@@ -415,11 +480,11 @@ def update_schedule(schedule_id):
         if 'end_time' in data:
             schedule.end_time = datetime.strptime(data['end_time'], '%H:%M').time()
         if 'active' in data:
-            schedule.active = bool(data['active'])  
+            schedule.active = bool(data['active'])
         
         db.session.commit()
         
-        # ✅ Retornar o objeto atualizado para confirmação
+        print(f"✅ Horário {schedule_id} atualizado com sucesso")
         return jsonify({
             'message': 'Horário atualizado com sucesso',
             'schedule': {
@@ -428,95 +493,38 @@ def update_schedule(schedule_id):
             }
         })
     except Exception as e:
+        print(f"❌ Erro ao atualizar horário: {str(e)}")
         db.session.rollback()
         return jsonify({'error': f'Erro interno: {str(e)}'}), 500
 
-# Endpoint para criar horários padrão para um barbeiro
-@app.route('/schedules/<int:barber_id>/default', methods=['POST'])
-def create_default_schedule(barber_id):
+# ✅ ENDPOINT PARA EXCLUIR HORÁRIO PERMANENTEMENTE
+@app.route('/schedules/<int:schedule_id>', methods=['DELETE'])
+def delete_schedule(schedule_id):
     try:
-        # Verificar se o barbeiro existe
-        barber = User.query.get(barber_id)
-        if not barber or barber.type != 'barber':
-            return jsonify({'error': 'Barbeiro não encontrado'}), 404
-        
-        # Verificar se já tem horários cadastrados
-        existing = BarberSchedule.query.filter_by(barber_id=barber_id).first()
-        if existing:
-            return jsonify({'error': 'Barbeiro já possui horários cadastrados'}), 400
-        
-        # Criar horários padrão (Segunda a Sábado, 9h às 19h)
-        for day in range(6):  # 0=Segunda a 5=Sábado
-            schedule = BarberSchedule(
-                barber_id=barber_id,
-                day_of_week=day,
-                start_time=time(9, 0),  # 9:00
-                end_time=time(19, 0),   # 19:00
-                active=True
-            )
-            db.session.add(schedule)
-        
-        db.session.commit()
-        return jsonify({'message': 'Horários padrão criados com sucesso'}), 201
-        
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': f'Erro interno: {str(e)}'}), 500
-
-
-# Criar horários padrão para um barbeiro
-@app.route('/schedules/<int:barber_id>/default', methods=['POST'])
-def create_default_schedule(barber_id):
-    try:
-        # Verificar se o barbeiro existe
-        barber = User.query.get(barber_id)
-        if not barber or barber.type != 'barber':
-            return jsonify({'error': 'Barbeiro não encontrado'}), 404
-        
-        # Verificar se já tem horários cadastrados
-        existing = BarberSchedule.query.filter_by(barber_id=barber_id).first()
-        if existing:
-            return jsonify({'error': 'Barbeiro já possui horários cadastrados'}), 400
-        
-        # Criar horários padrão (Segunda a Sábado, 9h às 19h)
-        for day in range(6):  # 0=Segunda a 5=Sábado
-            schedule = BarberSchedule(
-                barber_id=barber_id,
-                day_of_week=day,
-                start_time=time(9, 0),  # 9:00
-                end_time=time(19, 0),   # 19:00
-                active=True
-            )
-            db.session.add(schedule)
-        
-        db.session.commit()
-        return jsonify({'message': 'Horários padrão criados com sucesso'}), 201
-        
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': f'Erro interno: {str(e)}'}), 500
-
-
-
-# Atualizar horário existente
-@app.route('/schedules/<int:schedule_id>', methods=['PUT'])
-def update_schedule(schedule_id):
-    try:
+        print(f"🗑️ Excluindo horário {schedule_id}")
         schedule = BarberSchedule.query.get_or_404(schedule_id)
-        data = request.get_json()
         
-        if 'day_of_week' in data:
-            schedule.day_of_week = data['day_of_week']
-        if 'start_time' in data:
-            schedule.start_time = datetime.strptime(data['start_time'], '%H:%M').time()
-        if 'end_time' in data:
-            schedule.end_time = datetime.strptime(data['end_time'], '%H:%M').time()
-        if 'active' in data:
-            schedule.active = data['active']
+        # Verificar se há agendamentos futuros para este horário (opcional)
+        future_appointments = Appointment.query.join(Service).filter(
+            Appointment.barber_id == schedule.barber_id,
+            Appointment.status == 'scheduled',
+            Appointment.appointment_date > datetime.now(),
+        ).first()
         
+        if future_appointments:
+            return jsonify({
+                'error': 'Não é possível excluir este horário pois há agendamentos futuros. Desative temporariamente.'
+            }), 400
+        
+        # Exclusão definitiva
+        db.session.delete(schedule)
         db.session.commit()
-        return jsonify({'message': 'Horário atualizado com sucesso'})
+        
+        print(f"✅ Horário {schedule_id} excluído permanentemente")
+        return jsonify({'message': 'Horário excluído permanentemente'})
+        
     except Exception as e:
+        print(f"❌ Erro ao excluir horário: {str(e)}")
         db.session.rollback()
         return jsonify({'error': f'Erro interno: {str(e)}'}), 500
 
@@ -682,7 +690,8 @@ def home():
             "login": "/auth/login",
             "barbers": "/barbers",
             "services": "/services",
-            "appointments": "/appointments"
+            "appointments": "/appointments",
+            "schedules": "/schedules"
         }
     })
 
